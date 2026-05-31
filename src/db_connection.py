@@ -1,146 +1,171 @@
 """Database Connection Module
 
-This module handles all database connections and operations for the Student Management System.
-It provides a singleton connection manager to ensure efficient database resource usage.
+This module handles the MySQL database connection and provides utilities
+for executing queries with proper error handling and parameterized statements.
 """
 
 import mysql.connector
 from mysql.connector import Error
-from dotenv import load_dotenv
 import os
-from typing import Optional, List, Tuple, Any
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-
 class DatabaseConnection:
-    """Manages MySQL database connections and queries."""
-
-    _instance: Optional['DatabaseConnection'] = None
-    _connection = None
-
-    def __new__(cls):
-        """Implement singleton pattern for database connection."""
-        if cls._instance is None:
-            cls._instance = super(DatabaseConnection, cls).__new__(cls)
-        return cls._instance
+    """Manages MySQL database connections and operations."""
 
     def __init__(self):
-        """Initialize database connection with credentials from environment variables."""
-        if self._connection is None:
-            self.connect()
+        """Initialize database connection parameters from environment variables."""
+        self.host = os.getenv('DB_HOST', 'localhost')
+        self.user = os.getenv('DB_USER', 'root')
+        self.password = os.getenv('DB_PASSWORD', '')
+        self.database = os.getenv('DB_NAME', 'student_management_system')
+        self.port = int(os.getenv('DB_PORT', 3306))
+        self.connection = None
 
-    def connect(self) -> bool:
-        """Establish database connection using environment variables.
+    def connect(self):
+        """Establish a connection to the MySQL database.
 
         Returns:
-            bool: True if connection successful, False otherwise
+            bool: True if connection successful, False otherwise.
         """
         try:
-            self._connection = mysql.connector.connect(
-                host=os.getenv('DB_HOST', 'localhost'),
-                port=int(os.getenv('DB_PORT', 3306)),
-                user=os.getenv('DB_USER', 'root'),
-                password=os.getenv('DB_PASSWORD', ''),
-                database=os.getenv('DB_NAME', 'student_management_system')
+            self.connection = mysql.connector.connect(
+                host=self.host,
+                user=self.user,
+                password=self.password,
+                database=self.database,
+                port=self.port
             )
-
-            if self._connection.is_connected():
-                print("✓ Database connection established successfully")
+            if self.connection.is_connected():
+                print(f"Connected to MySQL database: {self.database}")
                 return True
         except Error as e:
-            print(f"✗ Error connecting to MySQL database: {e}")
+            print(f"Error connecting to MySQL: {e}")
             return False
 
-    def disconnect(self) -> None:
-        """Close database connection."""
-        if self._connection and self._connection.is_connected():
-            self._connection.close()
-            print("✓ Database connection closed")
+    def disconnect(self):
+        """Close the database connection."""
+        if self.connection and self.connection.is_connected():
+            self.connection.close()
+            print("Disconnected from MySQL database")
 
-    def execute_query(self, query: str, params: Tuple = ()) -> bool:
-        """Execute a query that modifies data (INSERT, UPDATE, DELETE).
+    def execute_query(self, query, params=None, fetch=False):
+        """Execute a SQL query with optional parameters.
 
         Args:
-            query: SQL query string with %s placeholders
-            params: Tuple of parameters for parameterized query
+            query (str): SQL query to execute
+            params (tuple): Query parameters for parameterized queries
+            fetch (bool): If True, fetch and return results
 
         Returns:
-            bool: True if query executed successfully, False otherwise
+            list/int: Query results if fetch=True, affected rows if fetch=False
         """
-        cursor = None
+        if not self.connection or not self.connection.is_connected():
+            print("Database connection not established")
+            return None
+
         try:
-            cursor = self._connection.cursor()
-            cursor.execute(query, params)
-            self._connection.commit()
+            cursor = self.connection.cursor(dictionary=True)
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+
+            if fetch:
+                results = cursor.fetchall()
+                cursor.close()
+                return results
+            else:
+                self.connection.commit()
+                affected_rows = cursor.rowcount
+                cursor.close()
+                return affected_rows
+        except Error as e:
+            print(f"Error executing query: {e}")
+            self.connection.rollback()
+            return None
+
+    def execute_many(self, query, data):
+        """Execute multiple queries with different parameters.
+
+        Args:
+            query (str): SQL query to execute
+            data (list): List of parameter tuples
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.connection or not self.connection.is_connected():
+            print("Database connection not established")
+            return False
+
+        try:
+            cursor = self.connection.cursor()
+            cursor.executemany(query, data)
+            self.connection.commit()
+            cursor.close()
             return True
         except Error as e:
-            print(f"✗ Error executing query: {e}")
-            self._connection.rollback()
+            print(f"Error executing batch queries: {e}")
+            self.connection.rollback()
             return False
-        finally:
-            if cursor:
-                cursor.close()
 
-    def fetch_one(self, query: str, params: Tuple = ()) -> Optional[Tuple]:
+    def fetch_one(self, query, params=None):
         """Fetch a single row from database.
 
         Args:
-            query: SQL query string with %s placeholders
-            params: Tuple of parameters for parameterized query
+            query (str): SQL query to execute
+            params (tuple): Query parameters
 
         Returns:
-            Tuple: Single row data or None if not found
+            dict: Single row as dictionary or None
         """
-        cursor = None
+        if not self.connection or not self.connection.is_connected():
+            print("Database connection not established")
+            return None
+
         try:
-            cursor = self._connection.cursor()
-            cursor.execute(query, params)
+            cursor = self.connection.cursor(dictionary=True)
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
             result = cursor.fetchone()
+            cursor.close()
             return result
         except Error as e:
-            print(f"✗ Error fetching data: {e}")
+            print(f"Error fetching data: {e}")
             return None
-        finally:
-            if cursor:
-                cursor.close()
 
-    def fetch_all(self, query: str, params: Tuple = ()) -> List[Tuple]:
-        """Fetch multiple rows from database.
+    def fetch_all(self, query, params=None):
+        """Fetch all rows from database.
 
         Args:
-            query: SQL query string with %s placeholders
-            params: Tuple of parameters for parameterized query
+            query (str): SQL query to execute
+            params (tuple): Query parameters
 
         Returns:
-            List[Tuple]: List of rows or empty list if no results
+            list: All rows as list of dictionaries
         """
-        cursor = None
-        try:
-            cursor = self._connection.cursor()
-            cursor.execute(query, params)
-            results = cursor.fetchall()
-            return results if results else []
-        except Error as e:
-            print(f"✗ Error fetching data: {e}")
+        if not self.connection or not self.connection.is_connected():
+            print("Database connection not established")
             return []
-        finally:
-            if cursor:
-                cursor.close()
 
-    def is_connected(self) -> bool:
-        """Check if database connection is active.
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            results = cursor.fetchall()
+            cursor.close()
+            return results
+        except Error as e:
+            print(f"Error fetching data: {e}")
+            return []
 
-        Returns:
-            bool: True if connected, False otherwise
-        """
-        return self._connection is not None and self._connection.is_connected()
 
-    def get_connection(self):
-        """Get the raw database connection object.
-
-        Returns:
-            Connection object or None
-        """
-        return self._connection
+# Global database instance
+db = DatabaseConnection()

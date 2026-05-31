@@ -1,218 +1,183 @@
 """Course Management Module
 
-This module handles all course-related operations including add, update, delete, and retrieve.
-It implements OOP principles with proper validation and exception handling.
+This module handles all course-related operations including
+adding, updating, deleting, and retrieving courses.
 """
 
-from db_connection import DatabaseConnection
-from typing import List, Optional, Dict, Any
+from db_connection import db
 
 
 class Course:
-    """Class to manage course records in the database."""
-
-    def __init__(self, course_name: str, credits: int, description: str = None):
-        """Initialize a Course object.
-
-        Args:
-            course_name: Name of the course
-            credits: Number of credits for the course
-            description: Course description
-        """
-        self.course_name = course_name
-        self.credits = credits
-        self.description = description
-        self.db = DatabaseConnection()
+    """Manages course operations in the database."""
 
     @staticmethod
-    def validate_credits(credits: int) -> bool:
-        """Validate credits value.
+    def validate_credits(credits):
+        """Validate course credits.
 
         Args:
-            credits: Number of credits to validate
+            credits (int): Number of credits
 
         Returns:
             bool: True if valid, False otherwise
         """
-        return isinstance(credits, int) and 1 <= credits <= 10
+        try:
+            credits_int = int(credits)
+            return credits_int > 0
+        except (ValueError, TypeError):
+            return False
 
-    def add_course(self) -> Optional[int]:
+    @staticmethod
+    def add_course(course_name, credits):
         """Add a new course to the database.
 
+        Args:
+            course_name (str): Name of the course
+            credits (int): Number of credits
+
         Returns:
-            int: Course ID if successful, None otherwise
+            dict: Result with 'success' and 'message' keys
         """
         # Validate inputs
-        if not self.course_name or len(self.course_name.strip()) == 0:
-            print("✗ Course name is required")
-            return None
+        if not course_name or len(course_name.strip()) == 0:
+            return {'success': False, 'message': 'Course name is required'}
 
-        if not self.validate_credits(self.credits):
-            print("✗ Credits must be between 1 and 10")
-            return None
+        if not Course.validate_credits(credits):
+            return {'success': False, 'message': 'Credits must be a positive integer'}
 
         # Check if course already exists
-        existing = self.db.fetch_one(
-            "SELECT course_id FROM courses WHERE course_name = %s",
-            (self.course_name,)
-        )
+        query = "SELECT course_id FROM courses WHERE course_name = %s"
+        existing = db.fetch_one(query, (course_name,))
         if existing:
-            print("✗ Course with this name already exists")
-            return None
+            return {'success': False, 'message': 'Course already exists'}
 
-        # Insert course
-        query = """
-            INSERT INTO courses (course_name, credits, description)
-            VALUES (%s, %s, %s)
-        """
-        params = (self.course_name, self.credits, self.description)
-
-        if self.db.execute_query(query, params):
-            # Get the inserted course ID
-            result = self.db.fetch_one(
-                "SELECT course_id FROM courses WHERE course_name = %s",
-                (self.course_name,)
-            )
-            if result:
-                print(f"✓ Course added successfully with ID: {result[0]}")
-                return result[0]
+        # Insert new course
+        query = "INSERT INTO courses (course_name, credits) VALUES (%s, %s)"
+        result = db.execute_query(query, (course_name, credits))
+        if result is not None:
+            return {'success': True, 'message': f'Course {course_name} added successfully'}
         else:
-            print("✗ Failed to add course")
-            return None
+            return {'success': False, 'message': 'Error adding course'}
 
     @staticmethod
-    def get_course_by_id(course_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve course information by ID.
-
-        Args:
-            course_id: ID of the course to retrieve
-
-        Returns:
-            Dict: Course details or None if not found
-        """
-        db = DatabaseConnection()
-        result = db.fetch_one(
-            "SELECT * FROM courses WHERE course_id = %s",
-            (course_id,)
-        )
-        if result:
-            return {
-                'course_id': result[0],
-                'course_name': result[1],
-                'credits': result[2],
-                'description': result[3] if len(result) > 3 else None
-            }
-        return None
-
-    @staticmethod
-    def search_courses_by_name(course_name: str) -> List[Dict[str, Any]]:
-        """Search courses by name.
-
-        Args:
-            course_name: Course name to search (partial match)
-
-        Returns:
-            List[Dict]: List of matching courses
-        """
-        db = DatabaseConnection()
-        courses = []
-        results = db.fetch_all(
-            "SELECT * FROM courses WHERE course_name LIKE %s ORDER BY course_id",
-            (f"%{course_name}%",)
-        )
-
-        for result in results:
-            courses.append({
-                'course_id': result[0],
-                'course_name': result[1],
-                'credits': result[2],
-                'description': result[3] if len(result) > 3 else None
-            })
-        return courses
-
-    @staticmethod
-    def get_all_courses() -> List[Dict[str, Any]]:
-        """Retrieve all courses from the database.
-
-        Returns:
-            List[Dict]: List of all courses
-        """
-        db = DatabaseConnection()
-        results = db.fetch_all("SELECT * FROM courses ORDER BY course_id")
-        courses = []
-
-        for result in results:
-            courses.append({
-                'course_id': result[0],
-                'course_name': result[1],
-                'credits': result[2],
-                'description': result[3] if len(result) > 3 else None
-            })
-        return courses
-
-    @staticmethod
-    def update_course(course_id: int, **kwargs) -> bool:
+    def update_course(course_id, course_name=None, credits=None):
         """Update course information.
 
         Args:
-            course_id: ID of course to update
-            **kwargs: Fields to update (course_name, credits, description)
+            course_id (int): Course ID to update
+            course_name (str): New course name
+            credits (int): New credits value
 
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result with 'success' and 'message' keys
         """
-        db = DatabaseConnection()
+        # Check if course exists
+        query = "SELECT course_id FROM courses WHERE course_id = %s"
+        course = db.fetch_one(query, (course_id,))
+        if not course:
+            return {'success': False, 'message': 'Course not found'}
 
-        # Verify course exists
-        if not db.fetch_one("SELECT course_id FROM courses WHERE course_id = %s", (course_id,)):
-            print("✗ Course not found")
-            return False
+        # Validate credits if being updated
+        if credits is not None and not Course.validate_credits(credits):
+            return {'success': False, 'message': 'Credits must be a positive integer'}
 
-        # Validate credits if provided
-        if 'credits' in kwargs and not Course.validate_credits(kwargs['credits']):
-            print("✗ Credits must be between 1 and 10")
-            return False
+        # Check for duplicate course name
+        if course_name:
+            query = "SELECT course_id FROM courses WHERE course_name = %s AND course_id != %s"
+            existing = db.fetch_one(query, (course_name, course_id))
+            if existing:
+                return {'success': False, 'message': 'Course name already exists'}
 
         # Build update query
-        allowed_fields = {'course_name', 'credits', 'description'}
-        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+        updates = []
+        params = []
+        if course_name:
+            updates.append("course_name = %s")
+            params.append(course_name)
+        if credits is not None:
+            updates.append("credits = %s")
+            params.append(credits)
 
-        if not update_fields:
-            print("✗ No valid fields to update")
-            return False
+        if not updates:
+            return {'success': False, 'message': 'No fields to update'}
 
-        set_clause = ", ".join([f"{field} = %s" for field in update_fields.keys()])
-        query = f"UPDATE courses SET {set_clause} WHERE course_id = %s"
-        params = tuple(update_fields.values()) + (course_id,)
-
-        if db.execute_query(query, params):
-            print(f"✓ Course ID {course_id} updated successfully")
-            return True
+        params.append(course_id)
+        query = f"UPDATE courses SET {', '.join(updates)} WHERE course_id = %s"
+        result = db.execute_query(query, tuple(params))
+        if result is not None and result > 0:
+            return {'success': True, 'message': 'Course updated successfully'}
         else:
-            print("✗ Failed to update course")
-            return False
+            return {'success': False, 'message': 'Error updating course'}
 
     @staticmethod
-    def delete_course(course_id: int) -> bool:
+    def delete_course(course_id):
         """Delete a course from the database.
 
         Args:
-            course_id: ID of course to delete
+            course_id (int): Course ID to delete
 
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result with 'success' and 'message' keys
         """
-        db = DatabaseConnection()
+        # Check if course exists
+        query = "SELECT course_name FROM courses WHERE course_id = %s"
+        course = db.fetch_one(query, (course_id,))
+        if not course:
+            return {'success': False, 'message': 'Course not found'}
 
-        # Verify course exists
-        if not db.fetch_one("SELECT course_id FROM courses WHERE course_id = %s", (course_id,)):
-            print("✗ Course not found")
-            return False
-
-        # Delete course (cascading delete will remove enrollments)
-        if db.execute_query("DELETE FROM courses WHERE course_id = %s", (course_id,)):
-            print(f"✓ Course ID {course_id} deleted successfully")
-            return True
+        # Delete course (CASCADE will handle enrollments)
+        query = "DELETE FROM courses WHERE course_id = %s"
+        result = db.execute_query(query, (course_id,))
+        if result is not None and result > 0:
+            return {'success': True, 'message': f'Course {course["course_name"]} deleted successfully'}
         else:
-            print("✗ Failed to delete course")
-            return False
+            return {'success': False, 'message': 'Error deleting course'}
+
+    @staticmethod
+    def search_course(course_id=None, course_name=None):
+        """Search for courses by various criteria.
+
+        Args:
+            course_id (int): Course ID to search
+            course_name (str): Course name to search (partial match)
+
+        Returns:
+            list: List of matching courses
+        """
+        query = "SELECT * FROM courses WHERE 1=1"
+        params = []
+
+        if course_id:
+            query += " AND course_id = %s"
+            params.append(course_id)
+        if course_name:
+            query += " AND course_name LIKE %s"
+            params.append(f"%{course_name}%")
+
+        if params:
+            results = db.fetch_all(query, tuple(params))
+        else:
+            results = db.fetch_all(query)
+        return results
+
+    @staticmethod
+    def get_all_courses():
+        """Retrieve all courses from the database.
+
+        Returns:
+            list: All courses in the database
+        """
+        query = "SELECT * FROM courses ORDER BY course_name"
+        return db.fetch_all(query)
+
+    @staticmethod
+    def get_course_by_id(course_id):
+        """Retrieve a specific course by ID.
+
+        Args:
+            course_id (int): Course ID
+
+        Returns:
+            dict: Course information or None if not found
+        """
+        query = "SELECT * FROM courses WHERE course_id = %s"
+        return db.fetch_one(query, (course_id,))

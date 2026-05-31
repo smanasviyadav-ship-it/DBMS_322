@@ -1,57 +1,49 @@
 """Student Management Module
 
-This module handles all student-related operations including add, update, delete, and search.
-It implements OOP principles with proper validation and exception handling.
+This module handles all student-related operations including
+adding, updating, deleting, and searching for students.
 """
 
-from db_connection import DatabaseConnection
+from db_connection import db
+import re
 from datetime import datetime
-from typing import List, Optional, Tuple, Dict, Any
 
 
 class Student:
-    """Class to manage student records in the database."""
-
-    def __init__(self, first_name: str, last_name: str, email: str,
-                 gender: str = None, date_of_birth: str = None, phone: str = None):
-        """Initialize a Student object.
-
-        Args:
-            first_name: Student's first name
-            last_name: Student's last name
-            email: Student's email address (unique)
-            gender: Student's gender
-            date_of_birth: Student's date of birth (YYYY-MM-DD)
-            phone: Student's phone number
-        """
-        self.first_name = first_name
-        self.last_name = last_name
-        self.email = email
-        self.gender = gender
-        self.date_of_birth = date_of_birth
-        self.phone = phone
-        self.db = DatabaseConnection()
+    """Manages student operations in the database."""
 
     @staticmethod
-    def validate_email(email: str) -> bool:
+    def validate_email(email):
         """Validate email format.
 
         Args:
-            email: Email address to validate
+            email (str): Email address to validate
 
         Returns:
             bool: True if valid, False otherwise
         """
-        import re
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return re.match(pattern, email) is not None
 
     @staticmethod
-    def validate_date(date_str: str) -> bool:
+    def validate_phone(phone):
+        """Validate phone number format.
+
+        Args:
+            phone (str): Phone number to validate
+
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        pattern = r'^[0-9\-\+\(\)\s]+$'
+        return len(phone) >= 7 and re.match(pattern, phone) is not None
+
+    @staticmethod
+    def validate_date(date_str):
         """Validate date format (YYYY-MM-DD).
 
         Args:
-            date_str: Date string to validate
+            date_str (str): Date string to validate
 
         Returns:
             bool: True if valid, False otherwise
@@ -62,214 +54,182 @@ class Student:
         except ValueError:
             return False
 
-    def add_student(self) -> Optional[int]:
+    @staticmethod
+    def add_student(first_name, last_name, gender, date_of_birth, email, phone):
         """Add a new student to the database.
 
+        Args:
+            first_name (str): Student's first name
+            last_name (str): Student's last name
+            gender (str): Student's gender
+            date_of_birth (str): Date of birth (YYYY-MM-DD)
+            email (str): Student's email
+            phone (str): Student's phone number
+
         Returns:
-            int: Student ID if successful, None otherwise
+            dict: Result with 'success' and 'message' keys
         """
         # Validate inputs
-        if not self.first_name or not self.last_name:
-            print("✗ First name and last name are required")
-            return None
+        if not first_name or not last_name:
+            return {'success': False, 'message': 'First name and last name are required'}
 
-        if not self.validate_email(self.email):
-            print("✗ Invalid email format")
-            return None
+        if not Student.validate_email(email):
+            return {'success': False, 'message': 'Invalid email format'}
 
-        if self.date_of_birth and not self.validate_date(self.date_of_birth):
-            print("✗ Invalid date format. Use YYYY-MM-DD")
-            return None
+        if not Student.validate_phone(phone):
+            return {'success': False, 'message': 'Invalid phone number format'}
+
+        if not Student.validate_date(date_of_birth):
+            return {'success': False, 'message': 'Invalid date format. Use YYYY-MM-DD'}
 
         # Check if email already exists
-        existing = self.db.fetch_one(
-            "SELECT student_id FROM students WHERE email = %s",
-            (self.email,)
-        )
+        query = "SELECT student_id FROM students WHERE email = %s"
+        existing = db.fetch_one(query, (email,))
         if existing:
-            print("✗ Email already exists in the system")
-            return None
+            return {'success': False, 'message': 'Email already exists'}
 
-        # Insert student
+        # Insert new student
         query = """
             INSERT INTO students (first_name, last_name, gender, date_of_birth, email, phone)
             VALUES (%s, %s, %s, %s, %s, %s)
         """
-        params = (
-            self.first_name, self.last_name, self.gender,
-            self.date_of_birth, self.email, self.phone
-        )
-
-        if self.db.execute_query(query, params):
-            # Get the inserted student ID
-            result = self.db.fetch_one(
-                "SELECT student_id FROM students WHERE email = %s",
-                (self.email,)
-            )
-            if result:
-                print(f"✓ Student added successfully with ID: {result[0]}")
-                return result[0]
+        result = db.execute_query(query, (first_name, last_name, gender, date_of_birth, email, phone))
+        if result is not None:
+            return {'success': True, 'message': f'Student {first_name} {last_name} added successfully'}
         else:
-            print("✗ Failed to add student")
-            return None
+            return {'success': False, 'message': 'Error adding student'}
 
     @staticmethod
-    def get_student_by_id(student_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve student information by ID.
-
-        Args:
-            student_id: ID of the student to retrieve
-
-        Returns:
-            Dict: Student details or None if not found
-        """
-        db = DatabaseConnection()
-        result = db.fetch_one(
-            "SELECT * FROM students WHERE student_id = %s",
-            (student_id,)
-        )
-        if result:
-            return {
-                'student_id': result[0],
-                'first_name': result[1],
-                'last_name': result[2],
-                'gender': result[3],
-                'date_of_birth': result[4],
-                'email': result[5],
-                'phone': result[6]
-            }
-        return None
-
-    @staticmethod
-    def search_students_by_name(first_name: str = None, last_name: str = None) -> List[Dict[str, Any]]:
-        """Search students by name.
-
-        Args:
-            first_name: First name to search (partial match)
-            last_name: Last name to search (partial match)
-
-        Returns:
-            List[Dict]: List of matching students
-        """
-        db = DatabaseConnection()
-        students = []
-
-        if first_name and last_name:
-            query = "SELECT * FROM students WHERE first_name LIKE %s AND last_name LIKE %s"
-            results = db.fetch_all(query, (f"%{first_name}%", f"%{last_name}%"))
-        elif first_name:
-            query = "SELECT * FROM students WHERE first_name LIKE %s"
-            results = db.fetch_all(query, (f"%{first_name}%",))
-        elif last_name:
-            query = "SELECT * FROM students WHERE last_name LIKE %s"
-            results = db.fetch_all(query, (f"%{last_name}%",))
-        else:
-            return students
-
-        for result in results:
-            students.append({
-                'student_id': result[0],
-                'first_name': result[1],
-                'last_name': result[2],
-                'gender': result[3],
-                'date_of_birth': result[4],
-                'email': result[5],
-                'phone': result[6]
-            })
-        return students
-
-    @staticmethod
-    def get_all_students() -> List[Dict[str, Any]]:
-        """Retrieve all students from the database.
-
-        Returns:
-            List[Dict]: List of all students
-        """
-        db = DatabaseConnection()
-        results = db.fetch_all("SELECT * FROM students ORDER BY student_id")
-        students = []
-
-        for result in results:
-            students.append({
-                'student_id': result[0],
-                'first_name': result[1],
-                'last_name': result[2],
-                'gender': result[3],
-                'date_of_birth': result[4],
-                'email': result[5],
-                'phone': result[6]
-            })
-        return students
-
-    @staticmethod
-    def update_student(student_id: int, **kwargs) -> bool:
+    def update_student(student_id, **kwargs):
         """Update student information.
 
         Args:
-            student_id: ID of student to update
-            **kwargs: Fields to update (first_name, last_name, gender, date_of_birth, email, phone)
+            student_id (int): Student ID to update
+            **kwargs: Fields to update (first_name, last_name, gender, etc.)
 
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result with 'success' and 'message' keys
         """
-        db = DatabaseConnection()
+        # Check if student exists
+        query = "SELECT student_id FROM students WHERE student_id = %s"
+        student = db.fetch_one(query, (student_id,))
+        if not student:
+            return {'success': False, 'message': 'Student not found'}
 
-        # Verify student exists
-        if not db.fetch_one("SELECT student_id FROM students WHERE student_id = %s", (student_id,)):
-            print("✗ Student not found")
-            return False
-
-        # Validate email if provided
+        # Validate email if being updated
         if 'email' in kwargs and not Student.validate_email(kwargs['email']):
-            print("✗ Invalid email format")
-            return False
+            return {'success': False, 'message': 'Invalid email format'}
 
-        # Validate date if provided
-        if 'date_of_birth' in kwargs and kwargs['date_of_birth'] and not Student.validate_date(kwargs['date_of_birth']):
-            print("✗ Invalid date format. Use YYYY-MM-DD")
-            return False
+        # Validate phone if being updated
+        if 'phone' in kwargs and not Student.validate_phone(kwargs['phone']):
+            return {'success': False, 'message': 'Invalid phone number format'}
+
+        # Validate date if being updated
+        if 'date_of_birth' in kwargs and not Student.validate_date(kwargs['date_of_birth']):
+            return {'success': False, 'message': 'Invalid date format. Use YYYY-MM-DD'}
+
+        # Check for duplicate email
+        if 'email' in kwargs:
+            query = "SELECT student_id FROM students WHERE email = %s AND student_id != %s"
+            existing = db.fetch_one(query, (kwargs['email'], student_id))
+            if existing:
+                return {'success': False, 'message': 'Email already exists'}
 
         # Build update query
         allowed_fields = {'first_name', 'last_name', 'gender', 'date_of_birth', 'email', 'phone'}
-        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
         if not update_fields:
-            print("✗ No valid fields to update")
-            return False
+            return {'success': False, 'message': 'No valid fields to update'}
 
-        set_clause = ", ".join([f"{field} = %s" for field in update_fields.keys()])
+        set_clause = ', '.join([f"{field} = %s" for field in update_fields.keys()])
+        values = list(update_fields.values()) + [student_id]
+
         query = f"UPDATE students SET {set_clause} WHERE student_id = %s"
-        params = tuple(update_fields.values()) + (student_id,)
-
-        if db.execute_query(query, params):
-            print(f"✓ Student ID {student_id} updated successfully")
-            return True
+        result = db.execute_query(query, tuple(values))
+        if result is not None and result > 0:
+            return {'success': True, 'message': 'Student updated successfully'}
         else:
-            print("✗ Failed to update student")
-            return False
+            return {'success': False, 'message': 'Error updating student'}
 
     @staticmethod
-    def delete_student(student_id: int) -> bool:
+    def delete_student(student_id):
         """Delete a student from the database.
 
         Args:
-            student_id: ID of student to delete
+            student_id (int): Student ID to delete
 
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result with 'success' and 'message' keys
         """
-        db = DatabaseConnection()
-
-        # Verify student exists
-        student = db.fetch_one("SELECT * FROM students WHERE student_id = %s", (student_id,))
+        # Check if student exists
+        query = "SELECT first_name, last_name FROM students WHERE student_id = %s"
+        student = db.fetch_one(query, (student_id,))
         if not student:
-            print("✗ Student not found")
-            return False
+            return {'success': False, 'message': 'Student not found'}
 
-        # Delete student (cascading delete will remove enrollments)
-        if db.execute_query("DELETE FROM students WHERE student_id = %s", (student_id,)):
-            print(f"✓ Student ID {student_id} deleted successfully")
-            return True
+        # Delete student (CASCADE will handle enrollments)
+        query = "DELETE FROM students WHERE student_id = %s"
+        result = db.execute_query(query, (student_id,))
+        if result is not None and result > 0:
+            return {'success': True, 'message': f'Student {student["first_name"]} {student["last_name"]} deleted successfully'}
         else:
-            print("✗ Failed to delete student")
-            return False
+            return {'success': False, 'message': 'Error deleting student'}
+
+    @staticmethod
+    def search_student(student_id=None, email=None, first_name=None, last_name=None):
+        """Search for students by various criteria.
+
+        Args:
+            student_id (int): Student ID to search
+            email (str): Email to search
+            first_name (str): First name to search
+            last_name (str): Last name to search
+
+        Returns:
+            list: List of matching students
+        """
+        query = "SELECT * FROM students WHERE 1=1"
+        params = []
+
+        if student_id:
+            query += " AND student_id = %s"
+            params.append(student_id)
+        if email:
+            query += " AND email LIKE %s"
+            params.append(f"%{email}%")
+        if first_name:
+            query += " AND first_name LIKE %s"
+            params.append(f"%{first_name}%")
+        if last_name:
+            query += " AND last_name LIKE %s"
+            params.append(f"%{last_name}%")
+
+        if params:
+            results = db.fetch_all(query, tuple(params))
+        else:
+            results = db.fetch_all(query)
+        return results
+
+    @staticmethod
+    def get_all_students():
+        """Retrieve all students from the database.
+
+        Returns:
+            list: All students in the database
+        """
+        query = "SELECT * FROM students ORDER BY first_name, last_name"
+        return db.fetch_all(query)
+
+    @staticmethod
+    def get_student_by_id(student_id):
+        """Retrieve a specific student by ID.
+
+        Args:
+            student_id (int): Student ID
+
+        Returns:
+            dict: Student information or None if not found
+        """
+        query = "SELECT * FROM students WHERE student_id = %s"
+        return db.fetch_one(query, (student_id,))

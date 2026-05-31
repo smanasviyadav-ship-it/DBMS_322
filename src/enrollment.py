@@ -1,36 +1,24 @@
 """Enrollment Management Module
 
-This module handles all enrollment-related operations including enroll, remove enrollment,
-and retrieve enrollment information. It implements OOP principles with proper validation.
+This module handles all enrollment-related operations including
+enrolling students in courses, removing enrollments, and viewing enrollments.
 """
 
-from db_connection import DatabaseConnection
+from db_connection import db
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from student import Student
+from course import Course
 
 
 class Enrollment:
-    """Class to manage enrollment records in the database."""
-
-    def __init__(self, student_id: int, course_id: int, enrollment_date: str = None):
-        """Initialize an Enrollment object.
-
-        Args:
-            student_id: ID of the student
-            course_id: ID of the course
-            enrollment_date: Date of enrollment (YYYY-MM-DD), defaults to today
-        """
-        self.student_id = student_id
-        self.course_id = course_id
-        self.enrollment_date = enrollment_date or datetime.now().strftime('%Y-%m-%d')
-        self.db = DatabaseConnection()
+    """Manages enrollment operations in the database."""
 
     @staticmethod
-    def validate_date(date_str: str) -> bool:
+    def validate_date(date_str):
         """Validate date format (YYYY-MM-DD).
 
         Args:
-            date_str: Date string to validate
+            date_str (str): Date string to validate
 
         Returns:
             bool: True if valid, False otherwise
@@ -41,232 +29,168 @@ class Enrollment:
         except ValueError:
             return False
 
-    def enroll_student(self) -> bool:
+    @staticmethod
+    def enroll_student(student_id, course_id, enrollment_date=None):
         """Enroll a student in a course.
 
+        Args:
+            student_id (int): Student ID
+            course_id (int): Course ID
+            enrollment_date (str): Enrollment date (YYYY-MM-DD), defaults to today
+
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result with 'success' and 'message' keys
         """
-        # Validate inputs
-        if not isinstance(self.student_id, int) or self.student_id <= 0:
-            print("✗ Invalid student ID")
-            return False
-
-        if not isinstance(self.course_id, int) or self.course_id <= 0:
-            print("✗ Invalid course ID")
-            return False
-
-        if not self.validate_date(self.enrollment_date):
-            print("✗ Invalid enrollment date format. Use YYYY-MM-DD")
-            return False
-
-        # Check if student exists
-        student = self.db.fetch_one(
-            "SELECT student_id FROM students WHERE student_id = %s",
-            (self.student_id,)
-        )
+        # Validate student exists
+        student = Student.get_student_by_id(student_id)
         if not student:
-            print("✗ Student not found")
-            return False
+            return {'success': False, 'message': 'Student not found'}
 
-        # Check if course exists
-        course = self.db.fetch_one(
-            "SELECT course_id FROM courses WHERE course_id = %s",
-            (self.course_id,)
-        )
+        # Validate course exists
+        course = Course.get_course_by_id(course_id)
         if not course:
-            print("✗ Course not found")
-            return False
+            return {'success': False, 'message': 'Course not found'}
 
-        # Check if already enrolled
-        existing = self.db.fetch_one(
-            "SELECT enrollment_id FROM enrollments WHERE student_id = %s AND course_id = %s",
-            (self.student_id, self.course_id)
-        )
+        # Set enrollment date to today if not provided
+        if enrollment_date is None:
+            enrollment_date = datetime.now().strftime('%Y-%m-%d')
+        else:
+            if not Enrollment.validate_date(enrollment_date):
+                return {'success': False, 'message': 'Invalid date format. Use YYYY-MM-DD'}
+
+        # Check if student is already enrolled
+        query = "SELECT enrollment_id FROM enrollments WHERE student_id = %s AND course_id = %s"
+        existing = db.fetch_one(query, (student_id, course_id))
         if existing:
-            print("✗ Student is already enrolled in this course")
-            return False
+            return {'success': False, 'message': 'Student is already enrolled in this course'}
 
         # Insert enrollment
         query = """
             INSERT INTO enrollments (student_id, course_id, enrollment_date)
             VALUES (%s, %s, %s)
         """
-        params = (self.student_id, self.course_id, self.enrollment_date)
-
-        if self.db.execute_query(query, params):
-            print(f"✓ Student {self.student_id} enrolled in Course {self.course_id} successfully")
-            return True
+        result = db.execute_query(query, (student_id, course_id, enrollment_date))
+        if result is not None:
+            return {'success': True, 'message': f'Student {student["first_name"]} {student["last_name"]} enrolled in {course["course_name"]}'}
         else:
-            print("✗ Failed to enroll student")
-            return False
+            return {'success': False, 'message': 'Error enrolling student'}
 
     @staticmethod
-    def get_student_courses(student_id: int) -> List[Dict[str, Any]]:
-        """Get all courses a student is enrolled in.
+    def remove_enrollment(enrollment_id):
+        """Remove an enrollment.
 
         Args:
-            student_id: ID of the student
+            enrollment_id (int): Enrollment ID to remove
 
         Returns:
-            List[Dict]: List of courses with enrollment details
+            dict: Result with 'success' and 'message' keys
         """
-        db = DatabaseConnection()
-        courses = []
+        # Check if enrollment exists
+        query = "SELECT enrollment_id FROM enrollments WHERE enrollment_id = %s"
+        enrollment = db.fetch_one(query, (enrollment_id,))
+        if not enrollment:
+            return {'success': False, 'message': 'Enrollment not found'}
 
+        # Delete enrollment
+        query = "DELETE FROM enrollments WHERE enrollment_id = %s"
+        result = db.execute_query(query, (enrollment_id,))
+        if result is not None and result > 0:
+            return {'success': True, 'message': 'Enrollment removed successfully'}
+        else:
+            return {'success': False, 'message': 'Error removing enrollment'}
+
+    @staticmethod
+    def remove_enrollment_by_student_course(student_id, course_id):
+        """Remove enrollment for a specific student-course combination.
+
+        Args:
+            student_id (int): Student ID
+            course_id (int): Course ID
+
+        Returns:
+            dict: Result with 'success' and 'message' keys
+        """
+        query = "DELETE FROM enrollments WHERE student_id = %s AND course_id = %s"
+        result = db.execute_query(query, (student_id, course_id))
+        if result is not None and result > 0:
+            return {'success': True, 'message': 'Enrollment removed successfully'}
+        else:
+            return {'success': False, 'message': 'Enrollment not found or error removing it'}
+
+    @staticmethod
+    def get_all_enrollments():
+        """Retrieve all enrollments with student and course details.
+
+        Returns:
+            list: All enrollments with joined data
+        """
         query = """
-            SELECT c.course_id, c.course_name, c.credits, e.enrollment_date, e.grade
+            SELECT e.enrollment_id, e.student_id, e.course_id, e.enrollment_date,
+                   s.first_name, s.last_name, s.email,
+                   c.course_name, c.credits
+            FROM enrollments e
+            JOIN students s ON e.student_id = s.student_id
+            JOIN courses c ON e.course_id = c.course_id
+            ORDER BY s.first_name, s.last_name, c.course_name
+        """
+        return db.fetch_all(query)
+
+    @staticmethod
+    def get_enrollments_by_student(student_id):
+        """Get all enrollments for a specific student.
+
+        Args:
+            student_id (int): Student ID
+
+        Returns:
+            list: Enrollments for the student
+        """
+        query = """
+            SELECT e.enrollment_id, e.student_id, e.course_id, e.enrollment_date,
+                   c.course_name, c.credits
             FROM enrollments e
             JOIN courses c ON e.course_id = c.course_id
             WHERE e.student_id = %s
-            ORDER BY c.course_id
+            ORDER BY c.course_name
         """
-        results = db.fetch_all(query, (student_id,))
-
-        for result in results:
-            courses.append({
-                'course_id': result[0],
-                'course_name': result[1],
-                'credits': result[2],
-                'enrollment_date': result[3],
-                'grade': result[4]
-            })
-        return courses
+        return db.fetch_all(query, (student_id,))
 
     @staticmethod
-    def get_course_students(course_id: int) -> List[Dict[str, Any]]:
-        """Get all students enrolled in a course.
+    def get_enrollments_by_course(course_id):
+        """Get all students enrolled in a specific course.
 
         Args:
-            course_id: ID of the course
+            course_id (int): Course ID
 
         Returns:
-            List[Dict]: List of students with enrollment details
+            list: Students enrolled in the course
         """
-        db = DatabaseConnection()
-        students = []
-
         query = """
-            SELECT s.student_id, s.first_name, s.last_name, s.email, e.enrollment_date, e.grade
+            SELECT e.enrollment_id, e.student_id, e.course_id, e.enrollment_date,
+                   s.first_name, s.last_name, s.email
             FROM enrollments e
             JOIN students s ON e.student_id = s.student_id
             WHERE e.course_id = %s
-            ORDER BY s.student_id
+            ORDER BY s.first_name, s.last_name
         """
-        results = db.fetch_all(query, (course_id,))
-
-        for result in results:
-            students.append({
-                'student_id': result[0],
-                'first_name': result[1],
-                'last_name': result[2],
-                'email': result[3],
-                'enrollment_date': result[4],
-                'grade': result[5]
-            })
-        return students
+        return db.fetch_all(query, (course_id,))
 
     @staticmethod
-    def get_all_enrollments() -> List[Dict[str, Any]]:
-        """Get all enrollments in the system.
+    def get_enrollment_by_id(enrollment_id):
+        """Retrieve a specific enrollment.
+
+        Args:
+            enrollment_id (int): Enrollment ID
 
         Returns:
-            List[Dict]: List of all enrollments
+            dict: Enrollment information or None if not found
         """
-        db = DatabaseConnection()
-        enrollments = []
-
         query = """
-            SELECT e.enrollment_id, s.student_id, s.first_name, s.last_name,
-                   c.course_id, c.course_name, e.enrollment_date, e.grade
+            SELECT e.enrollment_id, e.student_id, e.course_id, e.enrollment_date,
+                   s.first_name, s.last_name, c.course_name
             FROM enrollments e
             JOIN students s ON e.student_id = s.student_id
             JOIN courses c ON e.course_id = c.course_id
-            ORDER BY e.enrollment_id
+            WHERE e.enrollment_id = %s
         """
-        results = db.fetch_all(query)
-
-        for result in results:
-            enrollments.append({
-                'enrollment_id': result[0],
-                'student_id': result[1],
-                'student_name': f"{result[2]} {result[3]}",
-                'course_id': result[4],
-                'course_name': result[5],
-                'enrollment_date': result[6],
-                'grade': result[7]
-            })
-        return enrollments
-
-    @staticmethod
-    def remove_enrollment(student_id: int, course_id: int) -> bool:
-        """Remove a student's enrollment from a course.
-
-        Args:
-            student_id: ID of the student
-            course_id: ID of the course
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        db = DatabaseConnection()
-
-        # Check if enrollment exists
-        enrollment = db.fetch_one(
-            "SELECT enrollment_id FROM enrollments WHERE student_id = %s AND course_id = %s",
-            (student_id, course_id)
-        )
-        if not enrollment:
-            print("✗ Enrollment record not found")
-            return False
-
-        # Delete enrollment
-        if db.execute_query(
-            "DELETE FROM enrollments WHERE student_id = %s AND course_id = %s",
-            (student_id, course_id)
-        ):
-            print(f"✓ Student {student_id} removed from Course {course_id} successfully")
-            return True
-        else:
-            print("✗ Failed to remove enrollment")
-            return False
-
-    @staticmethod
-    def update_grade(student_id: int, course_id: int, grade: str) -> bool:
-        """Update a student's grade in a course.
-
-        Args:
-            student_id: ID of the student
-            course_id: ID of the course
-            grade: Grade to assign (A, B+, B, C, etc.)
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        db = DatabaseConnection()
-
-        # Validate grade
-        valid_grades = {'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'}
-        if grade not in valid_grades:
-            print(f"✗ Invalid grade. Valid grades are: {', '.join(valid_grades)}")
-            return False
-
-        # Check if enrollment exists
-        enrollment = db.fetch_one(
-            "SELECT enrollment_id FROM enrollments WHERE student_id = %s AND course_id = %s",
-            (student_id, course_id)
-        )
-        if not enrollment:
-            print("✗ Enrollment record not found")
-            return False
-
-        # Update grade
-        if db.execute_query(
-            "UPDATE enrollments SET grade = %s WHERE student_id = %s AND course_id = %s",
-            (grade, student_id, course_id)
-        ):
-            print(f"✓ Grade updated successfully for Student {student_id} in Course {course_id}")
-            return True
-        else:
-            print("✗ Failed to update grade")
-            return False
+        return db.fetch_one(query, (enrollment_id,))
